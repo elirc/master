@@ -1,0 +1,20 @@
+{
+  "name": "Master Life Plan",
+  "short_name": "LifePlan",
+  "description": "Daily checklist, timeline, and life planning hierarchy.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
+
+
+

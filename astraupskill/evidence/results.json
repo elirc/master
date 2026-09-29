@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "executedTests": 7,
+  "checks": [
+    {
+      "project": "_Organized Desktop/03 Master Projects/master",
+      "id": "785c7da790a8",
+      "command": [
+        "node",
+        "--experimental-vm-modules",
+        "--test",
+        "tests/task-project-isolation.test.mjs"
+      ],
+      "cwd": "C:\\Users\\Owner\\Desktop\\AstraOrganized2\\astra-remaining-improvements\\stage\\785c7da790a8",
+      "environmentOverrides": {},
+      "startedAt": "2026-09-22T00:13:44.329926+00:00",
+      "status": "complete",
+      "log": "crud-b02-runtime7.log",
+      "pid": 23144,
+      "exitCode": 0,
+      "passed": true,
+      "finishedAt": "2026-09-22T00:14:02.893259+00:00",
+      "elapsedSeconds": 18.56
+    }
+  ],
+  "limits": [
+    "The regression uses explicit Prisma and auth doubles; it does not connect to a live database.",
+    "The route's authentication wrapper is stubbed, so middleware and session construction are outside this check.",
+    "The ownership read and task update/create are separate calls; concurrent project deletion or reassignment is outside this bounded fix.",
+    "Schema parsing is stubbed: real Zod validation and Next HTTP handling were not exercised."
+  ]
+}
