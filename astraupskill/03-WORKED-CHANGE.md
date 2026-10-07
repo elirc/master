@@ -1,35 +1,54 @@
 # Repair create and reassign together
 
-Read the original route snapshots before the changed files. In POST, trace
-the submitted projectId into prisma.task.create. In PATCH, notice that the
-existing updateMany already constrains the task by userId. That is valuable
-behavior to preserve, but it covers the source task rather than the selected
-destination. The smallest coherent repair validates the destination on both
-write paths that accept it.
+Read the snapshots in `snapshots/` before the current files. They are the
+exact pre-change routes; diffing them against `src/app/api/tasks/route.ts`
+and `src/app/api/tasks/[id]/route.ts` shows only the two inserted blocks
+below (whitespace and line endings aside).
 
-For creation, parse the body and resolve a project using both body.projectId
-and auth.user.id. Select only the identifier because the decision requires
-existence within that scope, not a full project object. If the lookup returns
-null, return a project-not-found response before calling task.create. Otherwise
-continue using the existing payload construction, defaults and success status.
-Do not accept userId from the request as a shortcut for this lookup.
+In the original POST, `body.projectId` flows straight into
+`prisma.task.create`. In the original PATCH, `updateMany` is already
+constrained by `{ id, userId }`. That is valuable and stays, but it covers
+the *source* task, not the selected *destination*. The smallest coherent
+repair validates the destination on both write paths that accept it.
 
-For PATCH, apply the same lookup only when projectId is supplied. The key
-branch is presence, not truthiness. A title-only body must bypass the project
-lookup and retain its existing edit behavior; a supplied empty identifier must
-not slip into the write unexamined. After an allowed destination lookup, keep
-the existing task ID and user ID predicate. A zero update count remains a
-task-not-found outcome, and the existing success response remains intact.
+## POST (`tasks/route.ts`, inserted at lines 38-44)
 
-Review the order of effects as carefully as the response text. The important
-negative assertion is that the forbidden relationship produces no task write.
-A handler that writes first and then returns 404 would have the same visible
-status but violate the rule. The fixture therefore records persistence calls
-and checks arguments, rather than testing the response status alone.
+```ts
+const project = await prisma.project.findFirst({
+  where: { id: body.projectId, userId: auth.user.id },
+  select: { id: true },
+});
+if (!project) {
+  return Response.json({ error: "Project not found" }, { status: 404 });
+}
+```
 
-This implementation intentionally leaves neighboring GET filtering and DELETE
-archival alone. It also avoids changing schema versions or installing an
-entire dependency tree just to demonstrate the boundary. Those choices keep
-the before-and-after comparison narrow enough to teach. When proposing a
-follow-up, identify a separate observable failure and its regression instead
-of growing this patch into a general rewrite of the task API.
+It runs after `taskSchema.parse` and before `task.create`. It selects only
+`id` because the decision needs existence-within-scope, not the project
+object. The create payload, defaults (`notes ?? null`, `tags ?? []`,
+`defaultEstimateMin ?? 30`, `archived ?? false`) and the 201 are unchanged.
+
+## PATCH (`tasks/[id]/route.ts`, inserted at lines 23-31)
+
+The same lookup, wrapped in `if (body.projectId !== undefined) { ... }`.
+A title-only body skips it; a supplied `""` must enter it. After an allowed
+lookup the existing `updateMany({ where: { id, userId }, data: body })` still
+runs, a zero count is still `404 Task not found`, and the success path still
+re-reads the task.
+
+## Why the order of effects matters
+
+The negative assertion that matters is "the forbidden relationship produces
+no task write". A handler that wrote first and then returned 404 would show
+the same status and still violate the rule. That is why the regression
+records every `create`/`updateMany` call and its arguments instead of
+checking status alone.
+
+## What was deliberately left alone
+
+GET filtering, DELETE archival, the schema and migrations are untouched, and
+so are the sibling routes listed in 01 that accept `areaId`, `taskId` or
+`goalId` without an ownership check. Leaving them keeps the before/after
+comparison teachable, but it means the invariant is enforced for tasks only.
+06 records those siblings as open findings; fixing one is a good follow-up
+patch with its own regression, not a reason to grow this one.

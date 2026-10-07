@@ -1,37 +1,55 @@
 # Map the task write boundary
 
-Start with [package.json](../package.json). This is a Next application using
-Prisma, with its normal test command aimed at a timer test. The focused route
-regression added for this lesson is a separate command; do not assume that
-running the existing npm test automatically executes every new fixture.
-Dependency manifests describe the application, while captured evidence tells
-you which command actually ran for this change.
+[package.json](../package.json) shows a Next 16 app (`next dev --webpack`)
+with Prisma 6.16 and Zod 4. `npm test` is `tsx --test tests/timer.test.ts`
+only; the relationship regression in `tests/task-project-isolation.test.mjs`
+is a separate command (see the README). Dependency manifests describe the
+application; the captured evidence tells you which command actually ran.
 
-The [Prisma schema](../prisma/schema.prisma) defines User, Project and Task.
-Project has userId; Task has both userId and projectId. Task's project relation
-references the project identifier. Read those fields together and ask which
-constraint expresses equal ownership. An ordinary project foreign key cannot
-answer that question, so the route needs an authorization decision before
-writing the relationship.
+## The data model
 
-The collection route exports GET and POST. GET filters tasks by the current
-user and can narrow by project. POST parses a task body and constructs a
-create payload using the authenticated user ID. The supplied project ID is a
-different trust boundary: it originated in the request and must be checked
-against that same user. Merely sourcing task.userId from authentication does
-not make every other field safe.
+[schema.prisma](../prisma/schema.prisma) (SQLite) gives `Project` a `userId`
+and an `areaId` (lines 94-107) and `Task` both a `userId` and a `projectId`
+(lines 109-127). The initial migration creates plain single-column foreign
+keys (`Task_projectId_fkey`, `Project_areaId_fkey`, ...). Nothing in the
+schema says "task.userId must equal task.project.userId" — that rule exists
+only in route code. The same shape repeats for `DayTask.taskId`,
+`ScheduleBlock.taskId`, `TimeEntry.taskId` and `DashboardWidget.goalId`.
 
-The item route exports PATCH and DELETE. PATCH uses a local optional-field
-schema and updateMany constrained by task ID plus authenticated user ID.
-DELETE archives a matching task. The change concerns POST and PATCH destination
-selection; the archive behavior remains a useful neighboring path to inspect
-without changing its product semantics.
+## The request path
 
-Finally, [api.ts](../src/lib/api.ts) supplies withUser and handleError. withUser
-obtains the authenticated user and produces an unauthorized response when
-none exists. The focused fixture substitutes that dependency, so it checks
-the route's response to an authentication result rather than session lookup.
-Draw arrows from request to auth to parsing to project lookup to task write.
-Label each arrow with its data, not just a function name. That diagram makes
-it much easier to spot a request identifier crossing into persistence without
-an ownership decision.
+```
+request ─► withUser() ─► schema.parse(body) ─► project.findFirst({id, userId}) ─► task.create / task.updateMany
+            src/lib/api.ts:5   lib/schemas.ts or a       tasks/route.ts:38-44           tasks/route.ts:46-56
+                               local patchSchema         tasks/[id]/route.ts:23-31      tasks/[id]/route.ts:33-36
+```
+
+- `withUser()` ([api.ts](../src/lib/api.ts) lines 5-11) calls `requireUser()`
+  and returns either `{ user }` or a ready-made 401 response.
+- `handleError()` (same file, lines 13-29) maps `ZodError` to 400 with
+  `issues`, **any other `Error` to 400 with its raw `message`**, and
+  everything else to 500. Remember that second branch; 06 uses it.
+- The collection route exports GET (filters by `auth.user.id`, optional
+  `?projectId=`) and POST. POST takes `userId` from auth, but `projectId`
+  comes from the request body — a different trust boundary.
+- The item route exports PATCH and DELETE. PATCH parses a local
+  `patchSchema` (lines 6-13, every field optional), then `updateMany` with
+  `where: { id, userId }` and `data: body`. A zero `count` becomes
+  `404 Task not found`; otherwise it re-reads the task by `id`. DELETE
+  archives (`archived: true`) rather than deleting.
+
+## Neighbors that write the same kind of relationship
+
+| Route | Client-supplied relation id | Ownership check? |
+| --- | --- | --- |
+| `api/tasks` POST, `api/tasks/[id]` PATCH | `projectId` | Yes (this lesson) |
+| `api/projects` POST, `api/projects/[id]` PATCH | `areaId` | No |
+| `api/daytask` POST | `taskId` | No |
+| `api/schedule-blocks` POST / `[id]` PATCH | `taskId` | No |
+| `api/time-entries` POST (manual and `start`) | `taskId` | No |
+| `api/widgets` POST | `goalId` | No |
+| `api/settings/import` POST | every id and foreign key | No (rows spread as-is) |
+
+Draw the arrows for one of these with the data on each arrow, not just the
+function name. That is how you spot a request identifier crossing into
+persistence without an ownership decision.
